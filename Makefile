@@ -1,6 +1,9 @@
 # Makefile for automatic export, optimization, and packing of SVG art
 
 # CHANGELOG:
+# V5.1
+# - Special version of Makefile that can work with SVG files that need
+#    a specific kind of XSL transform first
 # V5
 # - Removed large number of comments describing outdated functionality
 # - Added documentation on how to change build settings with .mk files
@@ -69,6 +72,7 @@ LN:=/bin/ln -sf
 ECHO:=/bin/echo -e
 REALPATH:=/usr/bin/realpath
 READLINK:=/usr/bin/readlink
+XSLTPROC:=/usr/bin/xsltproc
 
 INKSCAPEFLAGS:= -C
 GIFFLAGS:= -loop 0 -layers OptimizeTransparency +map
@@ -90,6 +94,7 @@ TARGETS:= pack
 # Everything before this line are variables a user may want to change.
 -include *.mk
 
+XSLTDIR:=xsltvec/
 VECDIR:=vec/
 WORKDIR:=work/
 OUTDIR:=out/
@@ -107,9 +112,14 @@ PACKLARGEDIR:=${PACKDIR}large/
 # ############################################
 
 # Detect SVG files in the project folder
-FILES:=$(sort $(notdir $(wildcard ${VECDIR}*.svg)))
+XSLTSRC:=$(sort $(notdir $(wildcard ${XSLTDIR}*.svg)))
+SOURCES:=$(basename ${XSLTSRC})
+
+# Convert the names to permutated targets
+FILES:=$(addsuffix .svg,$(shell set -- ${SOURCES}; for a; do shift; for b; do printf "%s-%s " "$$a" "$$b"; done; done))
 
 # Create target file names from the above information
+VEC:=$(patsubst %,${VECDIR}%,${FILES})
 SMALL:=$(patsubst %.svg,${SMALLDIR}%.png,${FILES})
 LARGE:=$(patsubst %.svg,${LARGEDIR}%.png,${FILES})
 EXPSMALL:=$(patsubst %.svg,${EXPSMALLDIR}%.png,${FILES})
@@ -130,6 +140,8 @@ PACKLARGE:=$(patsubst %.svg,${PACKLARGEDIR}%.png,${FILES})
 # ############################
 
 default: ${TARGETS}
+
+svg: ${VEC}
 
 large: ${LARGE}
 
@@ -159,6 +171,7 @@ gif-tg: ${OUTDIR}${PROJNAME}.mp4
 
 clean:
 	@${ECHO} " RM\t${WORKDIR}"; ${RM} ${WORKDIR}
+	@${ECHO} " RM\t${VECDIR}"; ${RM} ${VECDIR}
 
 packclean:
 	@${ECHO} " RM\t${PACKDIR}"; ${RM} ${PACKDIR}
@@ -199,6 +212,13 @@ endef
 
 %/:
 	@${ECHO} " MKDIR\t$@"; ${MKDIR} $@
+
+${VECDIR}%.svg: ${XSLTDIR}$$(word 1,$$(subst -, ,%)).svg ${XSLTDIR}$$(word 2,$$(subst -, ,%)).svg transform.xsl | $$(dir $$@)
+	@${ECHO} " XSLT\t$@"; \
+	if [[ "$$((0x$$(sha1sum <<<'$@' | cut -c2-5)%2))" -eq "0" ]]; \
+	 then ${XSLTPROC} --output $@ --stringparam cheeseburger $< transform.xsl $(word 2,$^) ; \
+	 else ${XSLTPROC} --output $@ --stringparam cheeseburger $(filter-out $<,$^) transform.xsl $< ; \
+	fi
 
 ${LARGEDIR}%.png: ${VECDIR}%.svg | $$(dir $$@)
 	$(call symlink_wrapper,INK,${INKSCAPE} ${INKSCAPEFLAGS} -e $@ $< >/dev/null)
